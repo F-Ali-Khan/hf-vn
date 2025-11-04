@@ -42,9 +42,8 @@ def compute_reso(an_res_file, centClass, wagon_id, outputdir, suffix):
 
     _, cent_min_max = get_centrality_bins(centClass)
     
-    # Temporary fix: pass 'sp' as default vn_method
-    # You should update getListOfHisots in utils to remove this parameter
-    histos_triplets, histos_triplets_lables = getListOfHisots(an_res_file, wagon_id, 'sp')
+    # only SP method
+    histos_triplets, histos_triplets_lables = getListOfHisots(an_res_file, wagon_id)
 
     # prepare output file
     ytitle = 'Q^{A} Q^{B}'
@@ -145,4 +144,4 @@ if __name__ == "__main__":
         wagon_id=args.wagon_id,
         outputdir=args.outputdir,
         suffix=args.suffix
-        )
+    )
