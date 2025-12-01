@@ -35,7 +35,7 @@ def make_yaml(flow_config, outdir, correlated=False):
 
 def project(flow_config, outdir, nworkers, mCutSets):
 	logger("Projections will be performed", level="INFO")
-	os.makedirs(f"{outdir}/proj", exist_ok=True)
+	os.makedirs(f"{outdir}/projs", exist_ok=True)
 
 	def run_projections(i):
 		"""Run sparse projection for a given cutset index."""
@@ -54,14 +54,14 @@ def project(flow_config, outdir, nworkers, mCutSets):
 
 def efficiencies(flow_config, outdir, nworkers, mCutSets):
 	logger("Efficiencies will be computed", level="INFO")
-	check_dir(f"{outdir}/eff")
+	check_dir(f"{outdir}/effs")
 
 	def run_efficiency(i):
 		"""Run efficiency computation for a given cutset index."""
 		iCutSet = f"{i:02d}"
 		print(f"\033[32mProcessing cutset {iCutSet}...\033[0m")
 
-		proj_cutset = f"{outdir}/proj/proj_{iCutSet}.root"
+		proj_cutset = f"{outdir}/projs/proj_{iCutSet}.root"
 		cmd = (
 			f"python3 {paths['Efficiencies']} {flow_config} {proj_cutset} -b"
 		)
@@ -73,14 +73,16 @@ def efficiencies(flow_config, outdir, nworkers, mCutSets):
 
 def get_vn_vs_mass(flow_config, outdir, nworkers, mCutSets):
 	logger("Fit v2 vs mass will be performed", level="INFO")
-	check_dir(f"{outdir}/ry")
+	check_dir(f"{outdir}/raw_yields")
 
 	def run_fit(i):
 		"""Run simultaneous fit for a given cutset index."""
 		iCutSets = f"{i:02d}"
+		if iCutSets != "00":
+			return
 		print(f"\033[32mProcessing cutset {iCutSets}...\033[0m")
 
-		proj_cutset = f"{outdir}/proj/proj_{iCutSets}.root"
+		proj_cutset = f"{outdir}/projs/proj_{iCutSets}.root"
 		cmd = (
 			f"python3 {paths['GetVnVsMass']} {flow_config} {proj_cutset} -b"
 		)
@@ -96,8 +98,8 @@ def cut_variation(flow_config, outdir, correlated, combined=False, operations=No
 	if correlated:
 		logger("Cut variation will be performed", level="INFO")
 
-		ry_path = f"{outdir}/ry"
-		eff_path = f"{outdir}/eff"
+		ry_path = f"{outdir}/raw_yields"
+		eff_path = f"{outdir}/effs"
 
 		cmd = (
 			f"python3 {paths['CutVariation']} {flow_config} {ry_path} {eff_path} -b"
@@ -151,7 +153,7 @@ def data_driven_fraction(outdir):
 	check_dir(f"{outdir}/frac")
  
 	cutvar_file = f"{outdir}/cutVar/cutVar.root"
-	eff_path = f"{outdir}/eff"
+	eff_path = f"{outdir}/effs"
 
 	cmd = (
 		f"python3 {paths['DataDrivenFraction']} {cutvar_file} {eff_path} -b"
@@ -163,7 +165,7 @@ def get_v2_vs_frac(flow_config, outdir, correlated=False, batch=False):
 	logger("Fit v2 vs fd fraction will be performed", level="INFO")
 	check_dir(f"{outdir}/v2")
 
-	ry_path = f"{outdir}/ry"
+	ry_path = f"{outdir}/raw_yields"
 	frac_path = f"{outdir}/frac"
 
 	cmd = (
@@ -285,6 +287,7 @@ def run_combined_cut_variation(flow_config, operations, nworkers, outdir):
 if __name__ == "__main__":
 	parser = argparse.ArgumentParser(description='Arguments')
 	parser.add_argument('flow_config', metavar='text', default='config_flow_d0.yml', help='configuration file')
+	parser.add_argument("--workers", "-w", type=int, default=1, help="number of workers")
 	parser.add_argument("--correlated", "-corr", action="store_true", help="perform correlated analysis")
 	parser.add_argument("--combined", "-comb", action="store_true", help="perform combined analysis")
 	args = parser.parse_args()
@@ -296,7 +299,7 @@ if __name__ == "__main__":
 		config = yaml.safe_load(cfgFlow)
 
 	operations = config['operations']
-	nworkers = config['nworkers']
+	nworkers = args.workers
 	if args.correlated:
 		outdir = f"{config['outdir']}/cutvar_{config['suffix']}" + "_correlated"
 	else:
@@ -310,7 +313,7 @@ if __name__ == "__main__":
 		nfile = nfile + 1
 	os.system(f'cp {args.flow_config} {outdir}/config_flow/{os.path.splitext(os.path.basename(args.flow_config))[0]}_{config["suffix"]}_{nfile}.yml')
 
-	if operations.get('preprocess_data') or operations.get('preprocess_mc'):
+	if operations.get('preprocess'):
 		print("\033[32mINFO: Preprocess will be performed\033[0m")
 		os.system(f"python3 {paths['Preprocess']} {args.flow_config}")
 	else:

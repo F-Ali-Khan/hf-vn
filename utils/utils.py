@@ -51,6 +51,215 @@ def make_dir_root_file(dir, file):
     if not file.GetDirectory(dir):
         file.mkdir(dir)
 		
+def make_dir_root_file(directory, file):
+    if not file.GetDirectory(directory):
+        file.mkdir(directory)
+        logger(f"Created directory {directory} in file {file.GetName()}", level='WARNING')
+    else:
+        logger(f"Directory {directory} already exists in file {file.GetName()}", level='WARNING')
+
+def profile_mass_sp(hist_mass_sp, inv_mass_bins, resolution):
+    '''
+    Profile the mass sparse to get vn versus mass
+    Input:
+        - hist_mass_sp:
+            THnSparse, input THnSparse object (already projected in centrality and pt)
+        - inv_mass_bins:
+            list of floats, bin edges for the mass axis
+        - resolution:
+            float, resolution to normalize the vn values
+    Output:
+        - hist_vn_vs_mass:
+            TH1D, histogram with vn as a function of mass
+    '''
+    hist_vn_vs_mass = ROOT.TH1D('hist_vn_vs_mass', 'hist_vn_vs_mass', len(inv_mass_bins)-1, np.array(inv_mass_bins))
+    hist_vn_vs_mass.SetDirectory(0)
+    for i in range(hist_vn_vs_mass.GetNbinsX()):
+        bin_low = hist_mass_sp.GetXaxis().FindBin(inv_mass_bins[i])
+        bin_high = hist_mass_sp.GetXaxis().FindBin(inv_mass_bins[i+1])
+        profile = hist_mass_sp.ProfileY(f'profile_{bin_low}_{bin_high}', bin_low, bin_high)
+        mean_sp = profile.GetMean()
+        mean_sp_err = profile.GetMeanError()
+        hist_vn_vs_mass.SetBinContent(i+1, mean_sp / resolution)
+        hist_vn_vs_mass.SetBinError(i+1, mean_sp_err / resolution)
+    return hist_vn_vs_mass
+
+def get_vn_versus_mass(sparse, inv_mass_bins, mass_axis, vn_axis, debug=False):
+    '''
+    Project vn versus mass
+
+    Input:
+        - sparse:
+            THnSparse, input THnSparse object (already projected in centrality and pt)
+        - inv_mass_bins:
+            list of floats, bin edges for the mass axis
+        - mass_axis:
+            int, axis number for mass
+        - vn_axis:
+            int, axis number for vn
+        - debug:
+            bool, if True, create a debug file with the projections (default: False)
+
+    Output:
+        - hist_mass_proj:
+            TH1D, histogram with vn as a function of mass
+    '''
+    hist_mass_sp_proj = sparse.Projection(vn_axis, mass_axis)
+    hist_mass_sp_proj.SetName('hist_mass_sp_proj')
+    hist_mass_sp_proj.SetDirectory(0)
+
+    hist_mass_proj = sparse.Projection(mass_axis)
+    hist_mass_proj.Reset()
+    vn_vs_mass_bins = np.array(inv_mass_bins)
+    hist_mass_proj = ROOT.TH1D('hist_mass_proj', 'hist_mass_proj', len(vn_vs_mass_bins)-1, vn_vs_mass_bins)
+
+    for i in range(hist_mass_proj.GetNbinsX()):
+        bin_low = hist_mass_sp_proj.GetXaxis().FindBin(vn_vs_mass_bins[i])
+        bin_high = hist_mass_sp_proj.GetXaxis().FindBin(vn_vs_mass_bins[i+1])
+        profile = hist_mass_sp_proj.ProfileY(f'profile_{bin_low}_{bin_high}', bin_low, bin_high)
+        mean_sp = profile.GetMean()
+        mean_sp_err = profile.GetMeanError()
+        hist_mass_proj.SetBinContent(i+1, mean_sp)
+        hist_mass_proj.SetBinError(i+1, mean_sp_err)
+
+    if debug:
+        outfile = ROOT.TFile('debug.root', 'RECREATE')
+        hist_mass_sp_proj.Write()
+        hist_mass_proj.Write()
+        outfile.Close()
+
+    return hist_mass_proj
+
+def get_vnfitter_results(vnFitter, secPeak, useRefl, useTempl):
+    '''
+    Get vn fitter results:
+    0: BkgInt
+    1: BkgSlope
+    2: SgnInt
+    3: Mean
+    4: Sigma
+    5: SecPeakInt
+    6: SecPeakMean
+    7: SecPeakSigma
+    8: ConstVnBkg
+    9: SlopeVnBkg
+    10: v2Sgn
+    11: v2SecPeak
+    12: reflection
+
+    Input:
+        - vnfitter:
+            VnVsMassFitter, vn fitter object
+        - secPeak:
+            bool, if True, save secondary peak results
+        - useRefl:
+            bool, if True, save the results with reflection
+
+    Output:
+        - vn_results:
+            dict, dictionary with vn results
+            vn: vn value
+            vnUnc: uncertainty of vn value
+            mean: mean value
+            meanUnc: uncertainty of mean value
+            sigma: sigma value
+            sigmaUnc: uncertainty of sigma value
+            ry: raw yield
+            ryUnc: uncertainty of raw yield
+            ryTrue: true raw yield
+            ryTrueUnc: uncertainty of true raw yield
+            signif: significance
+            signifUnc: uncertainty of significance
+            chi2: reduced chi2
+            prob: fit probability
+            fTotFuncMass: total fit function for mass
+            fTotFuncVn: total fit function for vn
+            secPeakMeanMass: secondary peak mean mass
+            secPeakMeanMassUnc: uncertainty of secondary peak mean mass
+            secPeakSigmaMass: secondary peak sigma mass
+            secPeakSigmaMassUnc: uncertainty of secondary peak sigma mass
+            secPeakMeanVn: secondary peak mean vn
+            secPeakMeanVnUnc: uncertainty of secondary peak mean vn
+            secPeakSigmaVn: secondary peak sigma vn
+            secPeakSigmaVnUnc: uncertainty of secondary peak sigma vn
+            vnSecPeak: vn secondary peak
+            vnSecPeakUnc: uncertainty of vn secondary peak
+            fMassRflFunc: mass reflection function
+            fMassBkgRflFunc: mass background reflection function
+            fVnSecPeakFunct: vn secondary peak function
+            fVnCompsFuncts: dictionary with vn components functions
+            fMassTemplFuncts: dictionary with mass template functions
+            vnTemplates: list of vn templates
+            vnTemplatesUncs: list of vn templates uncertainties
+    '''
+    vn_results = {}
+    vn_results['vn'] = vnFitter.GetVn()
+    vn_results['vnUnc'] = vnFitter.GetVnUncertainty()
+    vn_results['mean'] = vnFitter.GetMean()
+    vn_results['meanUnc'] = vnFitter.GetMeanUncertainty()
+    vn_results['sigma'] = vnFitter.GetSigma()
+    vn_results['sigmaUnc'] = vnFitter.GetSigmaUncertainty()
+    vn_results['ry'] = vnFitter.GetRawYield()
+    vn_results['ryUnc'] = vnFitter.GetRawYieldUncertainty()
+    vn_results['chi2'] = vnFitter.GetReducedChiSquare()
+    vn_results['prob'] = vnFitter.GetFitProbability()
+    vn_results['fTotFuncMass'] = vnFitter.GetMassTotFitFunc()
+    vn_results['fTotFuncVn'] = vnFitter.GetVnVsMassTotFitFunc()
+    vn_results['fBkgFuncMass'] = vnFitter.GetMassBkgFitFunc()
+    vn_results['fBkgFuncVn'] = vnFitter.GetVnVsMassBkgFitFunc()
+    vn_results['fSgnFuncMass'] = vnFitter.GetMassSignalFitFunc()
+
+    vn_results['fVnCompsFuncts'] = {}
+    vn_comps = vnFitter.GetVnCompsFuncts()
+    vn_results['fVnCompsFuncts']['vnSgn'] = vn_comps[0]
+    vn_results['fVnCompsFuncts']['vnBkg'] = vn_comps[1]
+    if secPeak:
+        vn_results['fVnCompsFuncts']['vnSecPeak'] = vn_comps[2]
+
+    bkg, bkgUnc = ctypes.c_double(), ctypes.c_double()
+    vnFitter.Background(3, bkg, bkgUnc)
+    vn_results['bkg'] = bkg.value
+    vn_results['bkgUnc'] = bkgUnc.value
+    sgn, sgnUnc = ctypes.c_double(), ctypes.c_double()
+    vnFitter.Signal(3, sgn, sgnUnc)
+    vn_results['ryTrue'] = sgn.value
+    vn_results['ryTrueUnc'] = sgnUnc.value
+    signif, signifUnc = ctypes.c_double(), ctypes.c_double()
+    vnFitter.Significance(3, signif, signifUnc)
+    vn_results['signif'] = signif.value
+    vn_results['signifUnc'] = signifUnc.value
+
+    massSgnPars = vnFitter.GetNMassSgnPars()
+    massBkgPars = vnFitter.GetNMassBkgPars()
+    massSecPeakPars = vnFitter.GetNMassSecPeakPars()
+    massReflPars = vnFitter.GetNMassReflPars()
+    totMassPars = massSgnPars + massBkgPars + massSecPeakPars +  massReflPars
+    vnSgnPars = vnFitter.GetNVnSgnPars()
+    vnBkgPars = vnFitter.GetNVnBkgPars()
+
+    if secPeak:
+        vn_results['fMassSecPeakFunc'] = vnFitter.GetMassSecPeakFunc()
+        vn_results['fVnSecPeakFunct'] = vnFitter.GetVnSecPeakFunc()
+        vn_results['secPeakMeanMass'] = vn_results['fTotFuncMass'].GetParameter(vn_results['fTotFuncMass'].GetParName(massSgnPars + massBkgPars + 1))
+        vn_results['secPeakMeanMassUnc'] = vn_results['fTotFuncMass'].GetParError(massSgnPars + massBkgPars + 1)
+        vn_results['secPeakSigmaMass'] = vn_results['fTotFuncMass'].GetParameter(vn_results['fTotFuncMass'].GetParName(massSgnPars + massBkgPars + 2))
+        vn_results['secPeakSigmaMassUnc'] = vn_results['fTotFuncMass'].GetParError(massSgnPars + massBkgPars + 2)
+        vn_results['secPeakMeanVn'] = vn_results['fTotFuncVn'].GetParameter(vn_results['fTotFuncVn'].GetParName(totMassPars + vnSgnPars + vnBkgPars + 1))
+        vn_results['secPeakMeanVnUnc'] = vn_results['fTotFuncVn'].GetParError(vnSgnPars + vnBkgPars + 1)
+        vn_results['secPeakSigmaVn'] = vn_results['fTotFuncVn'].GetParameter(vn_results['fTotFuncVn'].GetParName(totMassPars + vnSgnPars + vnBkgPars + 2))
+        vn_results['secPeakSigmaVnUnc'] = vn_results['fTotFuncVn'].GetParError(vnSgnPars + vnBkgPars + 2)
+        vn_results['vnSecPeak'] = vn_results['fTotFuncVn'].GetParameter(vn_results['fTotFuncVn'].GetParName(totMassPars + vnSgnPars + vnBkgPars))
+        vn_results['vnSecPeakUnc'] = vn_results['fTotFuncVn'].GetParError(totMassPars + vnSgnPars + vnBkgPars)
+
+    if useRefl:
+        vn_results['fMassRflFunc'] = vnFitter.GetMassRflFunc()
+        vn_results['fMassBkgRflFunc'] = vnFitter.GetMassBkgRflFunc()
+    
+    if useTempl:
+        vn_results['vnTemplates'] = list(vnFitter.GetVnTemplates())
+        vn_results['vnTemplatesUncs'] = list(vnFitter.GetVnTemplatesUncertainties())
+
+    return vn_results
 
 def get_particle_info(particleName):
     '''
@@ -182,8 +391,12 @@ def get_centrality_bins(centrality):
         return '15_20', [15, 20]
     if centrality == 'k1020':
         return '10_20', [10, 20]
+    if centrality == 'k1030':
+        return '10_30', [10, 30]
     if centrality == 'k020':
         return '0_20', [0, 20]
+    if centrality == 'k1030':
+        return '10_30', [10, 30]
     if centrality == 'k2030':
         return '20_30', [20, 30]
     elif centrality == 'k3040':
